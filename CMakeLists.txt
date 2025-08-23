@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.16)
+project(SwitchMonitor LANGUAGES CXX)
+
+# Use C++17 or newer
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Find libssh
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBSSH REQUIRED libssh)
+
+# Add executable
+add_executable(Switch_Monitor src/main.cpp)
+
+# Include libssh headers
+target_include_directories(Switch_Monitor PRIVATE ${LIBSSH_INCLUDE_DIRS})
+
+# Link libssh
+target_link_libraries(Switch_Monitor PRIVATE ${LIBSSH_LIBRARIES})
+
+# Fix for some systems requiring rpath
+target_link_options(Switch_Monitor PRIVATE ${LIBSSH_LDFLAGS_OTHER})
