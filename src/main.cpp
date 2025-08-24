@@ -16,6 +16,8 @@
 #include <thread>
 #include <chrono>
 
+#include <RoveComm/RoveCommUDP.h>
+
 /******************************************************************************
  * @brief Class to Monitor a network switch via SSH, collecting EIGRP topology,
  * interface statistics, and performing ping tests. The collected szData is parsed

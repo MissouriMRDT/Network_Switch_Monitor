@@ -1,25 +1,21 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-	"name": "C++",
-	"build": {
-		"dockerfile": "Dockerfile"
-	},
-	"features": {
-		"ghcr.io/devcontainers/features/git-lfs:1": {},
-		"ghcr.io/devcontainers/features/python:1": {}
-	},
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "gcc -v",
-
-	// Configure tool-specific properties.
+    "name": "C++",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "features": {
+        "ghcr.io/devcontainers/features/git-lfs:1": {},
+        "ghcr.io/devcontainers/features/python:1": {}
+    },
+    // Features to add to the dev container. More info: https://containers.dev/features.
+    // "features": {},
+    // Use 'forwardPorts' to make a list of ports inside the container available locally.
+    // "forwardPorts": [],
+    // Use 'postCreateCommand' to run commands after the container is created.
+    // "postCreateCommand": "gcc -v",
+    // Configure tool-specific properties.
     "customizations": {
         // Configure properties specific to VS Code.
         "vscode": {
@@ -68,10 +64,10 @@
                 "C_Cpp.default.cppStandard": "c++20",
                 "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
                 "C_Cpp.default.includePath": [
-                    "./external/rovecomm/src",
-                    "./external/rovecomm/src/**",
-					"/usr/include/libssh",
-					"/usr/include/libssh/**"
+                    "./external/RoveComm_CPP/src",
+                    "./external/RoveComm_CPP/src/**",
+                    "/usr/include/libssh",
+                    "/usr/include/libssh/**"
                 ],
                 "C_Cpp.default.defines": [
                     "__ROVECOMM_LIBRARY_MODE__=1"

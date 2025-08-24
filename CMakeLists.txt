@@ -9,6 +9,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSSH REQUIRED libssh)
 
+# Configure BSThreadPool
+add_compile_definitions(BS_THREAD_POOL_ENABLE_PAUSE=1)
+add_compile_definitions(BS_THREAD_POOL_ENABLE_PRIORITY=1)
+add_compile_definitions(BS_THREAD_POOL_ENABLE_WAIT_DEADLOCK_CHECK=1)
+
+## Find RoveComm
+set(__ROVECOMM_LIBRARY_MODE__ 0 CACHE INTERNAL "Force RoveComm to build in standalone mode")
+include_directories(external/RoveComm_CPP/src)
+add_subdirectory(external/RoveComm_CPP)
+
 # Add executable
 add_executable(Switch_Monitor src/main.cpp)
 
