@@ -63,6 +63,13 @@ public:
      ******************************************************************************/
     ~SwitchMonitor()
     {
+        // Clean up SSH channel.
+        if (sshChannel)
+        {
+            ssh_channel_send_eof(sshChannel);
+            ssh_channel_close(sshChannel);
+            ssh_channel_free(sshChannel);
+        }
         // Clean up SSH session.
         if (sshSession)
         {
@@ -82,30 +89,50 @@ public:
      ******************************************************************************/
     bool Connect()
     {
-        // Initialize SSH session.
         sshSession = ssh_new();
         if (!sshSession)
-        {
             return false;
-        }
 
-        // Set SSH options.
         ssh_options_set(sshSession, SSH_OPTIONS_HOST, m_szIP.c_str());
         ssh_options_set(sshSession, SSH_OPTIONS_USER, m_szUser.c_str());
+        ssh_options_set(sshSession, SSH_OPTIONS_HOSTKEYS, "ssh-rsa");
 
-        // Connect and authenticate.
         if (ssh_connect(sshSession) != SSH_OK)
         {
             std::cerr << "Error connecting: " << ssh_get_error(sshSession) << "\n";
             return false;
         }
 
-        // Authenticate with password.
         if (ssh_userauth_password(sshSession, m_szUser.c_str(), m_szPass.c_str()) != SSH_AUTH_SUCCESS)
         {
             std::cerr << "Auth failed: " << ssh_get_error(sshSession) << "\n";
             return false;
         }
+
+        // Open interactive channel with PTY + shell
+        sshChannel = ssh_channel_new(sshSession);
+        if (!sshChannel)
+        {
+            std::cerr << "Failed to create channel\n";
+            return false;
+        }
+        if (ssh_channel_open_session(sshChannel) != SSH_OK)
+        {
+            std::cerr << "Failed to open channel: " << ssh_get_error(sshSession) << "\n";
+            return false;
+        }
+        if (ssh_channel_request_pty(sshChannel) != SSH_OK)
+        {
+            std::cerr << "Failed to request PTY: " << ssh_get_error(sshSession) << "\n";
+            return false;
+        }
+        if (ssh_channel_request_shell(sshChannel) != SSH_OK)
+        {
+            std::cerr << "Failed to request shell: " << ssh_get_error(sshSession) << "\n";
+            return false;
+        }
+
+        this->RunCommand("terminal length 0");
 
         return true;
     }
@@ -121,39 +148,67 @@ public:
      ******************************************************************************/
     std::string RunCommand(const std::string &szCommand)
     {
-        // Create and open a new SSH channel.
-        ssh_channel channel = ssh_channel_new(sshSession);
-        // Check for channel creation errors.
-        if (!channel)
+        if (!sshChannel)
+            throw std::runtime_error("SSH channel not initialized");
+
+        // Send command (newline required)
+        std::string fullCmd = szCommand + "\n";
+        if (ssh_channel_write(sshChannel, fullCmd.c_str(), fullCmd.size()) < 0)
         {
-            throw std::runtime_error("Channel creation failed");
-        }
-        if (ssh_channel_open_session(channel) != SSH_OK)
-        {
-            throw std::runtime_error("Failed to open channel");
-        }
-        if (ssh_channel_request_exec(channel, szCommand.c_str()) != SSH_OK)
-        {
-            throw std::runtime_error("Exec request failed");
+            throw std::runtime_error("Failed to send command");
         }
 
-        // Read command szOutput.
-        char arBuffer[256];
-        int nbytes;
         std::string szOutput;
+        char buffer[512];
+        int nbytes;
+        bool sawPrompt = false;
 
-        // Read until no more szData is available.
-        while ((nbytes = ssh_channel_read(channel, arBuffer, sizeof(arBuffer), 0)) > 0)
+        while (true)
         {
-            szOutput.append(arBuffer, nbytes);
+            nbytes = ssh_channel_read_nonblocking(sshChannel, buffer, sizeof(buffer), 0);
+            if (nbytes > 0)
+            {
+                szOutput.append(buffer, nbytes);
+
+                // Cisco prompts usually end with > or # followed by a space/newline
+                if (szOutput.find("MRDT-CS-Rover#") != std::string::npos ||
+                    szOutput.find("MRDT-CS-Rover>") != std::string::npos)
+                {
+                    // Found prompt, mark it
+                    sawPrompt = true;
+
+                    // Give device a tiny grace period for trailing output
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+                    // Try one last drain
+                    while ((nbytes = ssh_channel_read_nonblocking(sshChannel, buffer, sizeof(buffer), 0)) > 0)
+                    {
+                        szOutput.append(buffer, nbytes);
+                    }
+
+                    break;
+                }
+            }
+            else
+            {
+                // No new data yet, wait briefly
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
         }
 
-        // Check for read errors.
-        ssh_channel_send_eof(channel);
-        ssh_channel_close(channel);
-        ssh_channel_free(channel);
+        // Strip the command echo and prompt from output
+        auto pos = szOutput.find(szCommand);
+        if (pos != std::string::npos)
+        {
+            szOutput = szOutput.substr(pos + szCommand.size());
+        }
+        // Trim trailing prompt
+        size_t promptPos = szOutput.rfind("MRDT-CS-Rover#");
+        if (promptPos != std::string::npos)
+        {
+            szOutput.erase(promptPos);
+        }
 
-        // Return the command szOutput.
         return szOutput;
     }
 
@@ -168,11 +223,11 @@ public:
     {
         std::string eigrp = RunCommand("show ip eigrp topology");
         std::string interfaces = RunCommand("show interfaces");
-        std::string pingtest = RunCommand("ping 8.8.8.8 repeat 5");
+
+        std::cout << interfaces << std::endl;
 
         ParseEIGRP(eigrp);
         ParseInterfaces(interfaces);
-        ParsePing(pingtest);
     }
 
 private:
@@ -216,23 +271,10 @@ private:
         }
     }
 
-    /******************************************************************************
-     * @brief Parse ping test szData and display the results.
-     *
-     * @param szData - The szData from "ping" command.
-     *
-     * @author clayjay3 (claytonraycowen@gmail.com)
-     * @date 2025-08-23
-     ******************************************************************************/
-    void ParsePing(const std::string &szData)
-    {
-        std::cout << "\n=== Ping Test ===\n"
-                  << szData << "\n";
-    }
-
     // Member variables.
     std::string m_szIP, m_szUser, m_szPass;
     ssh_session sshSession;
+    ssh_channel sshChannel;
 };
 
 /******************************************************************************
@@ -246,9 +288,9 @@ private:
 int main()
 {
     // Switch connection details.
-    std::string szIP = "192.168.1.1";
+    std::string szIP = "192.168.254.1";
     std::string szUser = "admin";
-    std::string szPass = "password";
+    std::string szPass = "nandgate";
 
     // Initialize and connect the monitor.
     SwitchMonitor Monitor(szIP, szUser, szPass);
@@ -258,22 +300,33 @@ int main()
         return 1;
     }
 
-    // Periodically collect and display stats.
-    while (true)
-    {
-        std::cout << "\n\n================= NEW SAMPLE =================\n";
-        try
-        {
-            Monitor.CollectStats();
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "Error collecting stats: " << e.what() << "\n";
-        }
+    std::cout << "SHOW VERSION:" << std::endl;
+    std::cout << Monitor.RunCommand("show version") << std::endl;
+    std::cout << "SHOW IP EIGRP TOPOLOGY:" << std::endl;
+    std::cout << Monitor.RunCommand("show ip eigrp topology") << std::endl;
+    std::cout << "SHOW IP INT BR:" << std::endl;
+    std::cout << Monitor.RunCommand("show ip int br") << std::endl;
+    std::cout << "SHOW INT STATUS:" << std::endl;
+    std::cout << Monitor.RunCommand("show int status") << std::endl;
+    std::cout << "SHOW INTERFACES:" << std::endl;
+    std::cout << Monitor.RunCommand("show interfaces") << std::endl;
 
-        // Wait before the next sample.
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    // // Periodically collect and display stats.
+    // while (true)
+    // {
+    //     std::cout << "\n\n================= NEW SAMPLE =================\n";
+    //     try
+    //     {
+    //         Monitor.CollectStats();
+    //     }
+    //     catch (const std::exception &e)
+    //     {
+    //         std::cerr << "Error collecting stats: " << e.what() << "\n";
+    //     }
+
+    //     // Wait before the next sample.
+    //     std::this_thread::sleep_for(std::chrono::seconds(1));
+    // }
 
     return 0;
 }
